@@ -2,10 +2,13 @@ import argparse
 import json
 import sys
 
+from llm_sdk import Small_LLM_Model
 from pydantic import ValidationError
 
+from .decoder import build_prompt, choose_name
 from .io_utils import load_functions, load_prompts, write_results
 from .models import FunctionCall
+from .vocab import load_token_texts
 
 DEFAULT_FUNCTIONS = "data/input/functions_definition.json"
 DEFAULT_INPUT = "data/input/function_calling_tests.json"
@@ -58,13 +61,35 @@ def main() -> None:
         print(f"Error: invalid input format: {e}", file=sys.stderr)
         sys.exit(1)
 
+    if not functions:
+        print("Error: no functions defined, nothing to call.",
+              file=sys.stderr)
+        sys.exit(1)
     print(f"Loaded {len(functions)} functions and {len(prompts)} prompts.")
 
-    # Placeholder until the decoder exists: no function chosen yet.
-    results = [
-        FunctionCall(prompt=p.prompt, name="TODO", parameters={})
-        for p in prompts
-    ]
+    try:
+        model = Small_LLM_Model()
+        vocab_size = len(model.get_logits_from_input_ids([0]))
+        token_texts = load_token_texts(
+            model.get_path_to_vocab_file(), vocab_size
+        )
+    except Exception as e:
+        print(f"Error: cannot load the model: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    names = [f.name for f in functions]
+    results: list[FunctionCall] = []
+    for p in prompts:
+        try:
+            text = build_prompt(functions, p.prompt)
+            ids = model.encode(text)[0].tolist()
+            name = choose_name(model, token_texts, ids, names)
+        except Exception as e:
+            print(f"Error on prompt {p.prompt!r}: {e}", file=sys.stderr)
+            continue
+        results.append(FunctionCall(prompt=p.prompt, name=name,
+                                    parameters={}))
+        print(f"{p.prompt!r} -> {name}")
 
     try:
         write_results(args.output, results)
