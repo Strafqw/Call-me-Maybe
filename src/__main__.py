@@ -5,7 +5,7 @@ import sys
 from llm_sdk import Small_LLM_Model
 from pydantic import ValidationError
 
-from .decoder import build_prompt, choose_name
+from .decoder import build_prompt, choose_name, generate_arguments
 from .io_utils import load_functions, load_prompts, write_results
 from .models import FunctionCall
 from .vocab import load_token_texts
@@ -84,12 +84,15 @@ def main() -> None:
             text = build_prompt(functions, p.prompt)
             ids = model.encode(text)[0].tolist()
             name = choose_name(model, token_texts, ids, names)
+            function = next(f for f in functions if f.name == name)
+            parameters = generate_arguments(model, token_texts, ids,
+                                            function)
         except Exception as e:
             print(f"Error on prompt {p.prompt!r}: {e}", file=sys.stderr)
             continue
         results.append(FunctionCall(prompt=p.prompt, name=name,
-                                    parameters={}))
-        print(f"{p.prompt!r} -> {name}")
+                                    parameters=parameters))
+        print(f"{p.prompt!r} -> {name} {parameters}")
 
     try:
         write_results(args.output, results)
