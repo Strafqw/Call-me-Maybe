@@ -172,6 +172,42 @@ def generate_number(
     return float(text[:-1])
 
 
+def generate_string(
+    model: Small_LLM_Model,
+    token_texts: list[str],
+    ids: list[int],
+    end: str,
+) -> str:
+    """Let the model write a string's content, then close it.
+
+    The opening quote must already be in ids. Quotes, backslashes and
+    newlines are not allowed inside the content, so no escaping is needed.
+
+    Args:
+        model: The loaded language model.
+        token_texts: Real text of each token id.
+        ids: Token ids so far, ending with the opening quote.
+        end: The character that closes the value ("," or "}").
+
+    Returns:
+        The generated string, without quotes or surrounding spaces.
+    """
+    close = '"' + end
+
+    def is_valid(s: str) -> bool:
+        q = s.find('"')
+        return q == -1 or s[q:] in ('"', close)
+
+    candidates = [
+        t for t, s in enumerate(token_texts)
+        if s and "\\" not in s and "\n" not in s and "\ufffd" not in s
+        and s.count('"') <= 1 and is_valid(s)
+    ]
+    text = generate(model, token_texts, ids, candidates, is_valid,
+                    lambda s: s.endswith(close), max_tokens=60)
+    return text[:-len(close)].strip()
+
+
 def generate_boolean(
     model: Small_LLM_Model,
     token_texts: list[str],
@@ -226,12 +262,17 @@ def generate_arguments(
     names = list(function.parameters)
     for i, name in enumerate(names):
         end = "}" if i == len(names) - 1 else ","
-        force(model, ids, f'"{name}":' if i == 0 else f' "{name}":')
+        key = f'"{name}":' if i == 0 else f' "{name}":'
         ptype = function.parameters[name].type
-        if ptype == "number":
-            args[name] = generate_number(model, token_texts, ids, end)
-        elif ptype == "boolean":
-            args[name] = generate_boolean(model, token_texts, ids, end)
+        if ptype == "string":
+            force(model, ids, key + ' "')
+            args[name] = generate_string(model, token_texts, ids, end)
         else:
-            raise ValueError(f"unsupported parameter type: {ptype}")
+            force(model, ids, key)
+            if ptype == "number":
+                args[name] = generate_number(model, token_texts, ids, end)
+            elif ptype == "boolean":
+                args[name] = generate_boolean(model, token_texts, ids, end)
+            else:
+                raise ValueError(f"unsupported parameter type: {ptype}")
     return args
