@@ -49,7 +49,7 @@ With custom files:
 uv run python -m src \
     --functions_definition data/input/functions_definition.json \
     --input data/input/function_calling_tests.json \
-    --output data/output/function_calling_results.json
+    --output data/output/function_calls.json
 ```
 
 All three arguments are optional; the values above are the defaults.
@@ -84,7 +84,7 @@ Loaded 5 functions and 11 prompts.
 'What is the square root of 16?' -> fn_get_square_root {'a': 16.0}
 "Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'" -> fn_substitute_string_with_regex {'source_string': 'The cat sat on the mat with another cat', 'regex': 'cat', 'replacement': 'dog'}
 ...
-Wrote 11 results to data/output/function_calling_results.json
+Wrote 11 results to data/output/function_calls.json
 ```
 
 Errors in the input files are reported without a crash:
