@@ -71,7 +71,8 @@ All three arguments are optional; the values above are the defaults.
 - The output is a list of `{"prompt", "name", "parameters"}` objects, one per
   prompt.
 
-Supported parameter types: `number` (written as a float), `string` and `boolean`.
+Supported parameter types: `number` (written as a float), `integer` (written as
+an int), `string` and `boolean`.
 
 ## Example usage
 
@@ -150,7 +151,7 @@ faster and cannot go wrong.
 |---|---|---|
 | function name | pieces of the valid names, as long as the text is still the start of `<name>"` | the text equals one full `<name>"` |
 | number | digits, `-`, `.`, an optional leading space, then the end character | a complete number (`-?\d+(\.\d+)?`) followed by `,` or `}` |
-| string | any token without `"`, `\`, newline or broken characters, plus a token that closes the string | the text ends with `"` followed by `,` or `}` |
+| string | any token that keeps the text a valid JSON string: `"` and `\` only as the escapes `\"`, `\\`, `\/`; no newlines, control or broken characters | an unescaped `"` followed by `,` or `}` |
 | boolean | pieces of `true` / `false` (optional leading space) | `true` or `false` followed by `,` or `}` |
 
 The "end character" is `,` if another parameter follows and `}` for the last one,
@@ -182,8 +183,10 @@ real text of a token, which is what the rules above check.
 - **The prompt lists every function with its description.** Constraints guarantee
   the format; the descriptions let the model pick the right function even when the
   names are not self-explanatory.
-- **No backslashes, quotes or newlines inside strings.** This avoids JSON escaping
-  entirely. The cost: regexes are written as `[0-9]+` rather than `\d+`.
+- **JSON escapes inside strings.** Strings may contain `\"`, `\\` and `\/`, so values
+  like `C:\Users\john` or `Say "hello"` can be written. The text is decoded with
+  `json.loads` at the end. Other escapes (`\n`, `\t`, `\b`...) are not allowed: in a
+  regex, `\b` must stay a backslash and a `b`, not become a backspace.
 - **Optional leading space in values.** The model naturally writes `" -4"` as the
   token `" -"` followed by `4`. Forcing a lone space before the value made the minus
   sign unlikely, so the space is left to the model instead.
@@ -224,6 +227,10 @@ real text of a token, which is what the rules above check.
   wanted to close with the token `' ",'` (space, quote, comma), which the first
   version did not allow. Solution: accept any closing token whose quote is followed
   by nothing or by the end character, and strip surrounding spaces from the value.
+- **Backslashes and quotes inside strings.** The first version banned `\` and `"`
+  in strings to avoid escaping, so a Windows path came out as `C:/Users/...` and a
+  quoted word was lost. Solution: allow the JSON escapes `\\`, `\"` and `\/`, check
+  them with a regex, and decode the value with `json.loads`.
 - **Speed.** Each logits call takes from a fraction of a second to a few seconds
   depending on input length and power mode. Forcing known text and pre-filtering
   candidates kept the full run within the 5-minute limit.

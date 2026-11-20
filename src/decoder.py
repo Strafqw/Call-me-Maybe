@@ -1,3 +1,4 @@
+import json
 import re
 from typing import Any, Callable
 
@@ -9,6 +10,10 @@ from .models import FunctionDef
 # Both allow one leading space, because the model often writes " -4".
 NUMBER_START = re.compile(r" ?-?\d*(\.\d*)?")
 NUMBER_DONE = re.compile(r" ?-?\d+(\.\d+)?")
+
+# One character inside a JSON string: anything except a quote, a backslash
+# or a control character, or one of the escapes \" \\ \/
+STRING_CHAR = r'(?:[^"\\\x00-\x1f]|\\["\\/])'
 
 
 def find_candidates(token_texts: list[str], targets: list[str]) -> list[int]:
@@ -144,6 +149,7 @@ def generate_number(
     token_texts: list[str],
     ids: list[int],
     end: str,
+    integer: bool = False,
 ) -> float:
     """Let the model write a number, followed by the end character.
 
@@ -152,13 +158,16 @@ def generate_number(
         token_texts: Real text of each token id.
         ids: Token ids so far. Chosen tokens are appended to it.
         end: The character that closes the value ("," or "}").
+        integer: If True, no decimal point is allowed and an int is
+            returned instead of a float.
 
     Returns:
         The generated number.
     """
+    chars = " 0123456789-" if integer else " 0123456789-."
     candidates = [
         t for t, s in enumerate(token_texts)
-        if s and (s == end or all(c in " 0123456789-." for c in s))
+        if s and (s == end or all(c in chars for c in s))
     ]
 
     def is_finished(s: str) -> bool:
@@ -169,7 +178,7 @@ def generate_number(
 
     text = generate(model, token_texts, ids, candidates,
                     is_valid, is_finished, max_tokens=30)
-    return float(text[:-1])
+    return int(text[:-1]) if integer else float(text[:-1])
 
 
 def generate_string(
@@ -180,8 +189,9 @@ def generate_string(
 ) -> str:
     """Let the model write a string's content, then close it.
 
-    The opening quote must already be in ids. Quotes, backslashes and
-    newlines are not allowed inside the content, so no escaping is needed.
+    The opening quote must already be in ids. The content follows JSON
+    rules: a quote or a backslash must be escaped (\\" or \\\\), and
+    control characters such as newlines are not allowed.
 
     Args:
         model: The loaded language model.
@@ -190,22 +200,26 @@ def generate_string(
         end: The character that closes the value ("," or "}").
 
     Returns:
-        The generated string, without quotes or surrounding spaces.
+        The generated string, unescaped, without surrounding spaces.
     """
     close = '"' + end
+    # Content so far, then optionally: a backslash waiting for the escaped
+    # character, or the closing quote (alone or followed by the end).
+    valid = re.compile(STRING_CHAR + r'*(?:\\|"' + re.escape(end) + "?)?")
+    done = re.compile(STRING_CHAR + r'*"' + re.escape(end))
 
     def is_valid(s: str) -> bool:
-        q = s.find('"')
-        return q == -1 or s[q:] in ('"', close)
+        return valid.fullmatch(s) is not None
 
     candidates = [
         t for t, s in enumerate(token_texts)
-        if s and "\\" not in s and "\n" not in s and "\ufffd" not in s
-        and s.count('"') <= 1 and is_valid(s)
+        if s and "\ufffd" not in s and (is_valid(s) or is_valid("\\" + s))
     ]
     text = generate(model, token_texts, ids, candidates, is_valid,
-                    lambda s: s.endswith(close), max_tokens=60)
-    return text[:-len(close)].strip()
+                    lambda s: done.fullmatch(s) is not None, max_tokens=60)
+    content = text[:-len(close)]
+    value: str = json.loads('"' + content + '"')
+    return value.strip()
 
 
 def generate_boolean(
@@ -269,8 +283,9 @@ def generate_arguments(
             args[name] = generate_string(model, token_texts, ids, end)
         else:
             force(model, ids, key)
-            if ptype == "number":
-                args[name] = generate_number(model, token_texts, ids, end)
+            if ptype in ("number", "integer"):
+                args[name] = generate_number(model, token_texts, ids, end,
+                                             integer=(ptype == "integer"))
             elif ptype == "boolean":
                 args[name] = generate_boolean(model, token_texts, ids, end)
             else:
