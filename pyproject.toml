@@ -29,3 +29,8 @@ mypy_path = "llm_sdk"
 [[tool.mypy.overrides]]
 module = ["llm_sdk", "llm_sdk.*"]
 follow_imports = "silent"
+
+# Don't analyse the big libraries llm_sdk uses (makes mypy much faster)
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "transformers", "transformers.*", "huggingface_hub", "huggingface_hub.*", "numpy", "numpy.*"]
+follow_imports = "skip"
